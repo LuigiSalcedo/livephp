@@ -66,6 +66,8 @@ func eventsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	setNoCacheHeaders(w)
+
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -108,6 +110,7 @@ func livereloadJSHandler(w http.ResponseWriter, r *http.Request) {
   };
 })();
 `
+	setNoCacheHeaders(w)
 	io.WriteString(w, script)
 }
 
@@ -249,9 +252,12 @@ func servePHP(w http.ResponseWriter, r *http.Request, scriptPath string) {
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		log.Printf("Error ejecutando php-cgi: %v\nSalida completa:\n%s\n", err, string(out))
-		http.Error(w, "Error ejecutando PHP", http.StatusInternalServerError)
-		return
+		if len(out) == 0 {
+			log.Printf("Error ejecutando php-cgi (sin salida): %v\n", err)
+			http.Error(w, "Error ejecutando PHP", http.StatusInternalServerError)
+			return
+		}
+		log.Printf("php-cgi devolvió error (pero con salida), se envía al cliente:\n%v\nSalida:\n%s\n", err, string(out))
 	}
 
 	parts := bytes.SplitN(out, []byte("\r\n\r\n"), 2)
@@ -297,11 +303,22 @@ func servePHP(w http.ResponseWriter, r *http.Request, scriptPath string) {
 		body = injectLiveReload(body)
 	}
 
+	setNoCacheHeaders(w)
+
 	w.Write(body)
+}
+
+func setNoCacheHeaders(w http.ResponseWriter) {
+	w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Expires", "0")
 }
 
 func serveStaticWithInject(fullPath string, w http.ResponseWriter, r *http.Request) {
 	ext := strings.ToLower(filepath.Ext(fullPath))
+
+	setNoCacheHeaders(w)
+
 	if ext != ".html" && ext != ".htm" {
 		// para CSS, JS, etc. servimos normal
 		http.ServeFile(w, r, fullPath)
